@@ -149,9 +149,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var window: FloatingPanel!
     var langButtons: [ToolButton] = []
     var sources: [InputSource] = []
+    var statusItem: NSStatusItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         sources = getInputSources()
+        setupMenuBar()
 
         let padding: CGFloat = 4
         let spacing: CGFloat = 4
@@ -258,6 +260,99 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.orderFrontRegardless()
     }
 
+    // MARK: - Menu Bar
+
+    func setupMenuBar() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        updateMenuBarTitle()
+        buildStatusMenu()
+    }
+
+    func shortLabel(for source: InputSource) -> String {
+        let id = source.id.lowercased()
+        let name = source.name
+
+        // 한국어 키보드 (2벌식, 3벌식 등)
+        if id.contains("korean") || name.contains("벌식") || name.contains("한국") || name.contains("한글") {
+            return "한"
+        }
+        // 중국어 병음
+        if id.contains("pinyin") || name.contains("拼") || name.contains("拼音") {
+            return "拼"
+        }
+        // 일본어
+        if id.contains("japanese") || name.contains("日本") {
+            return "あ"
+        }
+        // ABC / 영어
+        if id.contains("abc") || id.contains("us") || name == "ABC" || name == "U.S." {
+            return "A"
+        }
+        // 그 외: 첫 글자
+        return String(name.prefix(1))
+    }
+
+    func updateMenuBarTitle() {
+        let currentID = getCurrentSourceID()
+        let current = sources.first { $0.id == currentID }
+        let short = current.map { shortLabel(for: $0) } ?? "?"
+        statusItem.button?.title = short
+        statusItem.button?.font = NSFont.systemFont(ofSize: 14, weight: .medium)
+    }
+
+    func buildStatusMenu() {
+        let menu = NSMenu()
+
+        // 헤더
+        let header = NSMenuItem(title: "입력 소스", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        menu.addItem(NSMenuItem.separator())
+
+        // 입력 소스 목록
+        let currentID = getCurrentSourceID()
+        for (i, source) in sources.enumerated() {
+            let item = NSMenuItem(title: source.name, action: #selector(menuSwitchSource(_:)), keyEquivalent: "")
+            item.tag = i
+            item.target = self
+            if source.id == currentID {
+                item.state = .on
+            }
+            menu.addItem(item)
+        }
+
+        menu.addItem(NSMenuItem.separator())
+
+        // 스크린샷
+        let ssItem = NSMenuItem(title: "스크린샷 (클립보드)", action: #selector(menuScreenshot), keyEquivalent: "s")
+        ssItem.target = self
+        menu.addItem(ssItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        // 종료
+        let quitItem = NSMenuItem(title: "종료", action: #selector(quit), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
+
+        statusItem.menu = menu
+    }
+
+    @objc func menuSwitchSource(_ sender: NSMenuItem) {
+        let idx = sender.tag
+        guard idx >= 0 && idx < sources.count else { return }
+        switchTo(sources[idx])
+        updateHighlight()
+        updateMenuBarTitle()
+        buildStatusMenu()
+    }
+
+    @objc func menuScreenshot() {
+        takeScreenshot()
+    }
+
+    // MARK: - Highlight
+
     func updateHighlight() {
         let currentID = getCurrentSourceID()
         for (i, btn) in langButtons.enumerated() {
@@ -268,6 +363,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func inputSourceChanged() {
         DispatchQueue.main.async { [weak self] in
             self?.updateHighlight()
+            self?.updateMenuBarTitle()
+            self?.buildStatusMenu()
         }
     }
 
