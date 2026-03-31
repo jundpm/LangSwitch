@@ -1,0 +1,282 @@
+import Cocoa
+import Carbon
+
+// MARK: - Input Source
+
+struct InputSource {
+    let id: String
+    let name: String
+    let source: TISInputSource
+}
+
+func getInputSources() -> [InputSource] {
+    let conditions = [
+        kTISPropertyInputSourceCategory: kTISCategoryKeyboardInputSource!,
+        kTISPropertyInputSourceIsEnabled: true as CFBoolean
+    ] as CFDictionary
+
+    guard let sourceList = TISCreateInputSourceList(conditions, false)?.takeRetainedValue() as? [TISInputSource] else {
+        return []
+    }
+
+    return sourceList.compactMap { source in
+        guard let idPtr = TISGetInputSourceProperty(source, kTISPropertyInputSourceID),
+              let namePtr = TISGetInputSourceProperty(source, kTISPropertyLocalizedName),
+              let typePtr = TISGetInputSourceProperty(source, kTISPropertyInputSourceType) else {
+            return nil
+        }
+        let id = Unmanaged<CFString>.fromOpaque(idPtr).takeUnretainedValue() as String
+        let name = Unmanaged<CFString>.fromOpaque(namePtr).takeUnretainedValue() as String
+        let type = Unmanaged<CFString>.fromOpaque(typePtr).takeUnretainedValue() as String
+
+        let keyboardLayout = kTISTypeKeyboardLayout as String
+        let keyboardInputMode = kTISTypeKeyboardInputMode as String
+        guard type == keyboardLayout || type == keyboardInputMode else { return nil }
+
+        return InputSource(id: id, name: name, source: source)
+    }
+}
+
+func getCurrentSourceID() -> String {
+    let source = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
+    guard let idPtr = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else { return "" }
+    return Unmanaged<CFString>.fromOpaque(idPtr).takeUnretainedValue() as String
+}
+
+func switchTo(_ source: InputSource) {
+    TISSelectInputSource(source.source)
+}
+
+// MARK: - Floating Window
+
+class FloatingWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+
+    override init(contentRect: NSRect, styleMask style: NSWindow.StyleMask, backing backingStoreType: NSWindow.BackingStoreType, defer flag: Bool) {
+        super.init(contentRect: contentRect, styleMask: style, backing: backingStoreType, defer: flag)
+        level = .floating
+        isMovableByWindowBackground = true
+        backgroundColor = .clear
+        isOpaque = false
+        hasShadow = true
+        collectionBehavior = [.canJoinAllSpaces, .stationary]
+    }
+}
+
+// MARK: - Tool Button (reusable)
+
+class ToolButton: NSView {
+    var label: NSTextField!
+    var isActive = false
+    var onClick: (() -> Void)?
+    private var trackingArea: NSTrackingArea?
+    private var isHovered = false
+    private let activeColor: NSColor
+    private let minWidth: CGFloat
+
+    init(title: String, activeColor: NSColor = .systemBlue, minWidth: CGFloat = 70) {
+        self.activeColor = activeColor
+        self.minWidth = minWidth
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 8
+
+        label = NSTextField(labelWithString: title)
+        label.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        label.alignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 6),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -6),
+            widthAnchor.constraint(greaterThanOrEqualToConstant: minWidth),
+            heightAnchor.constraint(equalToConstant: 32)
+        ])
+
+        updateAppearance()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingArea { removeTrackingArea(existing) }
+        trackingArea = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways], owner: self)
+        addTrackingArea(trackingArea!)
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        onClick?()
+    }
+
+    func setActive(_ active: Bool) {
+        isActive = active
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        if isActive {
+            layer?.backgroundColor = activeColor.cgColor
+            label.textColor = .white
+        } else if isHovered {
+            layer?.backgroundColor = NSColor(white: 0.35, alpha: 1).cgColor
+            label.textColor = .white
+        } else {
+            layer?.backgroundColor = NSColor(white: 0.25, alpha: 1).cgColor
+            label.textColor = NSColor(white: 0.75, alpha: 1)
+        }
+    }
+}
+
+// MARK: - App Delegate
+
+class AppDelegate: NSObject, NSApplicationDelegate {
+    var window: FloatingWindow!
+    var langButtons: [ToolButton] = []
+    var sources: [InputSource] = []
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        sources = getInputSources()
+
+        let padding: CGFloat = 4
+        let spacing: CGFloat = 4
+        let buttonHeight: CGFloat = 32
+        let langButtonWidth: CGFloat = 74
+        let screenshotButtonWidth: CGFloat = 38
+        let dividerWidth: CGFloat = 1 + spacing * 2
+
+        let langSectionWidth = CGFloat(max(sources.count, 1)) * (langButtonWidth + spacing) - spacing
+        let width = padding + langSectionWidth + dividerWidth + screenshotButtonWidth + padding
+        let height = buttonHeight + padding * 2
+
+        let screen = NSScreen.main?.visibleFrame ?? .zero
+        let x = screen.maxX - width - 20
+        let y = screen.maxY - height - 20
+
+        window = FloatingWindow(
+            contentRect: NSRect(x: x, y: y, width: width, height: height),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor(white: 0.15, alpha: 0.95).cgColor
+        container.layer?.cornerRadius = 12
+        window.contentView = container
+
+        let stack = NSStackView()
+        stack.orientation = .horizontal
+        stack.spacing = spacing
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: padding),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -padding),
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: padding),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -padding)
+        ])
+
+        // Language buttons
+        for source in sources {
+            let btn = ToolButton(title: source.name, minWidth: langButtonWidth)
+            btn.onClick = { [weak self] in
+                switchTo(source)
+                self?.updateHighlight()
+            }
+            langButtons.append(btn)
+            stack.addArrangedSubview(btn)
+        }
+
+        // Divider
+        let divider = NSView()
+        divider.wantsLayer = true
+        divider.layer?.backgroundColor = NSColor(white: 0.35, alpha: 1).cgColor
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(divider)
+        NSLayoutConstraint.activate([
+            divider.widthAnchor.constraint(equalToConstant: 1),
+            divider.heightAnchor.constraint(equalToConstant: 20)
+        ])
+
+        // Screenshot button
+        let ssBtn = ToolButton(title: "\u{2702}", activeColor: .systemOrange, minWidth: screenshotButtonWidth)
+        ssBtn.onClick = { [weak self] in
+            self?.takeScreenshot()
+        }
+        stack.addArrangedSubview(ssBtn)
+
+        updateHighlight()
+
+        // Listen for input source changes (event-driven, no polling)
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(inputSourceChanged),
+            name: NSNotification.Name("AppleSelectedInputSourcesChangedNotification"),
+            object: nil
+        )
+
+        // Right-click menu
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: "종료", action: #selector(quit), keyEquivalent: "q"))
+        window.contentView?.menu = menu
+
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    func updateHighlight() {
+        let currentID = getCurrentSourceID()
+        for (i, btn) in langButtons.enumerated() {
+            btn.setActive(sources[i].id == currentID)
+        }
+    }
+
+    @objc func inputSourceChanged() {
+        DispatchQueue.main.async { [weak self] in
+            self?.updateHighlight()
+        }
+    }
+
+    func takeScreenshot() {
+        window.orderOut(nil)
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            task.arguments = ["-ic"]
+            try? task.run()
+            task.waitUntilExit()
+            DispatchQueue.main.async {
+                self?.window.makeKeyAndOrderFront(nil)
+            }
+        }
+    }
+
+    @objc func quit() {
+        NSApp.terminate(nil)
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+}
+
+// MARK: - Main
+
+let app = NSApplication.shared
+let delegate = AppDelegate()
+app.delegate = delegate
+app.setActivationPolicy(.accessory)
+app.run()
