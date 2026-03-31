@@ -160,13 +160,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let screenshotButtonWidth: CGFloat = 38
         let dividerWidth: CGFloat = 1 + spacing * 2
 
+        let gripWidth: CGFloat = 20
         let langSectionWidth = CGFloat(max(sources.count, 1)) * (langButtonWidth + spacing) - spacing
-        let width = padding + langSectionWidth + dividerWidth + screenshotButtonWidth + padding
+        let width = padding + gripWidth + spacing + langSectionWidth + dividerWidth + screenshotButtonWidth + padding
         let height = buttonHeight + padding * 2
 
         let screen = NSScreen.main?.visibleFrame ?? .zero
-        let x = screen.maxX - width - 20
-        let y = screen.maxY - height - 20
+        let x = screen.minX + 20
+        let y = screen.minY + 20
 
         window = FloatingPanel(
             contentRect: NSRect(x: x, y: y, width: width, height: height),
@@ -193,6 +194,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             stack.topAnchor.constraint(equalTo: container.topAnchor, constant: padding),
             stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -padding)
         ])
+
+        // Drag grip (6 dots)
+        let grip = NSTextField(labelWithString: "\u{2807}")  // ⠇ braille 6-dot
+        grip.font = NSFont.systemFont(ofSize: 16, weight: .bold)
+        grip.textColor = NSColor(white: 0.45, alpha: 1)
+        grip.alignment = .center
+        grip.translatesAutoresizingMaskIntoConstraints = false
+        let gripContainer = NSView()
+        gripContainer.addSubview(grip)
+        gripContainer.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            gripContainer.widthAnchor.constraint(equalToConstant: gripWidth),
+            grip.centerXAnchor.constraint(equalTo: gripContainer.centerXAnchor),
+            grip.centerYAnchor.constraint(equalTo: gripContainer.centerYAnchor)
+        ])
+        stack.addArrangedSubview(gripContainer)
 
         // Language buttons
         for source in sources {
