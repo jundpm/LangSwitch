@@ -49,16 +49,18 @@ func switchTo(_ source: InputSource) {
 
 // MARK: - Floating Window
 
-class FloatingWindow: NSWindow {
-    override var canBecomeKey: Bool { true }
+class FloatingPanel: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
 
     override init(contentRect: NSRect, styleMask style: NSWindow.StyleMask, backing backingStoreType: NSWindow.BackingStoreType, defer flag: Bool) {
-        super.init(contentRect: contentRect, styleMask: style, backing: backingStoreType, defer: flag)
+        super.init(contentRect: contentRect, styleMask: [.borderless, .nonactivatingPanel], backing: backingStoreType, defer: flag)
         level = .floating
         isMovableByWindowBackground = true
         backgroundColor = .clear
         isOpaque = false
         hasShadow = true
+        isFloatingPanel = true
         collectionBehavior = [.canJoinAllSpaces, .stationary]
     }
 }
@@ -144,7 +146,7 @@ class ToolButton: NSView {
 // MARK: - App Delegate
 
 class AppDelegate: NSObject, NSApplicationDelegate {
-    var window: FloatingWindow!
+    var window: FloatingPanel!
     var langButtons: [ToolButton] = []
     var sources: [InputSource] = []
 
@@ -166,7 +168,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let x = screen.maxX - width - 20
         let y = screen.maxY - height - 20
 
-        window = FloatingWindow(
+        window = FloatingPanel(
             contentRect: NSRect(x: x, y: y, width: width, height: height),
             styleMask: [.borderless],
             backing: .buffered,
@@ -236,7 +238,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "종료", action: #selector(quit), keyEquivalent: "q"))
         window.contentView?.menu = menu
 
-        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
     }
 
     func updateHighlight() {
